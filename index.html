@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Quoridor - 路墙棋</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700&family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/src/style.css" />
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+  </head>
+  <body style="background-color: #2b1d14; color: #fde0c4;">
+    <div id="app-container" style="display: flex; flex-direction: column; align-items: center; width: 100%; position: relative; justify-content: center;">
+      <header style="position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); width: 800px; text-align: center; margin-bottom: 0.5rem; pointer-events: none;">
+      <h1 style="font-family: 'Cinzel', serif; font-size: 4.5rem; font-weight: 700; letter-spacing: 4px; margin: 0; color: #fde0c4; text-shadow: 0 4px 20px rgba(0,0,0,0.8), 0 2px 5px rgba(0,0,0,0.5);">
+        Quoridor
+      </h1>
+      <p class="controls-hint" style="margin-top: 0.8rem; font-size: 1.05rem; color: #bcaaa4; font-weight: 400; max-width: 650px; margin-left: auto; margin-right: auto; line-height: 1.6; text-shadow: 0 1px 3px rgba(0,0,0,0.8);">
+        左键点击放置墙壁或移动，将鼠标悬停在横向或纵向缝隙上即可放置墙壁
+      </p>
+    </header>
+
+    <div style="position: absolute; bottom: 100%; right: 0; display: flex; gap: 0.8rem; z-index: 50; margin-bottom: 0.5rem;">
+      <button id="btn-help" class="btn-wood" style="display: flex; width: 44px; height: 44px; border-radius: 50%; font-size: 1.6rem; padding: 0; justify-content: center; align-items: center; box-shadow: 0 4px 10px rgba(0,0,0,0.5);" title="游戏规则">?</button>
+      <button id="btn-settings" class="btn-wood" style="display: flex; width: 44px; height: 44px; border-radius: 50%; font-size: 1.6rem; padding: 0; justify-content: center; align-items: center; box-shadow: 0 4px 10px rgba(0,0,0,0.5);" title="高级设置">⚙️</button>
+    </div>
+
+    <div id="layout">
+      <div class="sidebar">
+        <div class="panel">
+          <h3>🎮 游戏模式</h3>
+          <button id="btn-local" class="btn-wood active" style="margin-bottom: 0.8rem;">👥 本地双人 (1v1)</button>
+          <button id="btn-ai" class="btn-wood">💻 对战单机 AI</button>
+          
+          <div id="ai-difficulty-container" style="display: none; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(255,255,255,0.1);">
+            <div style="font-size: 0.9rem; color: #a89f91; margin-bottom: 0.5rem; text-align: center;">AI 难度</div>
+            <div style="display: flex; gap: 0.3rem;">
+              <button class="btn-wood diff-btn" data-level="easy" style="padding: 0.4rem; font-size: 0.8rem; flex: 1;">简单</button>
+              <button class="btn-wood diff-btn active" data-level="normal" style="padding: 0.4rem; font-size: 0.8rem; flex: 1;">普通</button>
+              <button class="btn-wood diff-btn" data-level="hard" style="padding: 0.4rem; font-size: 0.8rem; flex: 1;">困难</button>
+            </div>
+          </div>
+          
+          <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(255,255,255,0.1);">
+            <div style="font-size: 0.9rem; color: #a89f91; margin-bottom: 0.5rem; text-align: center;">声音设置</div>
+            <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+              <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <button id="btn-toggle-bgm" class="btn-wood" style="padding: 0.4rem; font-size: 0.9rem; flex: 1; text-align: left;">🎵 开启背景音乐</button>
+                <input type="range" id="slider-bgm-vol" min="0" max="1" step="0.01" value="0.5" style="width: 60px;" title="背景音乐音量">
+              </div>
+              <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <button id="btn-toggle-sfx" class="btn-wood active" style="padding: 0.4rem; font-size: 0.9rem; flex: 1; text-align: left;">🔊 音效: 开启</button>
+                <input type="range" id="slider-sfx-vol" min="0" max="1" step="0.01" value="1.0" style="width: 60px;" title="音效音量">
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <div class="panel" style="margin-top: 1rem; border-top: 4px solid #3b82f6;">
+          <div id="p1-status" class="player-status active" style="margin-bottom: 1rem; justify-content: flex-start; padding: 0;">
+            <div class="player-dot p1"></div>
+            <strong style="color: #70e1f5; font-size: 1.2rem;">Player 1 (蓝)</strong>
+          </div>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+            <span style="color: #a89f91;">墙壁剩余:</span>
+            <strong id="p1-walls" style="font-size: 1.2rem;">10</strong>
+          </div>
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span style="color: #a89f91;">剩余时间:</span>
+            <strong id="p1-time" style="font-size: 1.2rem; font-family: monospace;">05:00</strong>
+          </div>
+        </div>
+      </div>
+
+      <div id="app" style="display: flex; justify-content: center; align-items: center;">
+        <div class="board-container" style="display: flex; flex-direction: column; align-items: center;">
+          <div id="eval-bar-container" style="display: none; width: 100%; height: 12px; background: var(--p2-color); border-radius: 6px; overflow: hidden; border: 2px solid #5a3d24; box-shadow: inset 0 0 10px rgba(0,0,0,0.5); margin-bottom: 0.8rem;">
+            <div id="eval-bar-fill" style="width: 50%; height: 100%; background: var(--p1-color); transition: width 0.5s ease-out;"></div>
+          </div>
+          <div class="board" id="board">
+            <!-- Board rendered via JS -->
+          </div>
+        </div>
+      </div>
+
+      <div class="sidebar">
+        <div class="panel" style="margin-bottom: 1rem; border-top: 4px solid #ef4444;">
+          <div id="p2-status" class="player-status" style="margin-bottom: 1rem; justify-content: flex-start; padding: 0;">
+            <div class="player-dot p2"></div>
+            <strong style="color: #f87171; font-size: 1.2rem;">Player 2 (红)</strong>
+          </div>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+            <span style="color: #a89f91;">墙壁剩余:</span>
+            <strong id="p2-walls" style="font-size: 1.2rem;">10</strong>
+          </div>
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span style="color: #a89f91;">剩余时间:</span>
+            <strong id="p2-time" style="font-size: 1.2rem; font-family: monospace;">05:00</strong>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h3>📜 动作历史</h3>
+          <ul id="history-list" class="history-list"></ul>
+          <button id="btn-undo" class="btn-wood" style="margin-top: 1rem;">⏪ 撤销悔棋</button>
+          <button id="btn-hint" class="btn-wood" style="margin-top: 0.5rem; display: none;">💡 获取提示 (AI 支招)</button>
+        </div>
+      </div>
+    </div>
+    </div>
+
+
+    <!-- Victory Modal -->
+    <div id="victory-modal" class="modal-overlay">
+      <div class="modal">
+        <h2 id="victory-title">Player 1 Wins!</h2>
+        <p>游戏结束，是否重新开始？</p>
+        <button id="btn-restart" class="btn-wood" style="margin-top: 1.5rem;">🔄 再来一局</button>
+      </div>
+    </div>
+
+    <!-- Help Modal -->
+    <div id="help-modal" class="modal-overlay">
+      <div class="modal" style="text-align: left; max-width: 500px;">
+        <h2 style="color: #ffd194; margin-bottom: 1rem; border-bottom: 2px solid #5a3d24; padding-bottom: 0.5rem; text-align: center;">📜 步步为营 (Quoridor) 规则</h2>
+        <ul style="color: #fde0c4; line-height: 1.6; margin-left: 1.5rem; font-size: 1.05rem; padding-right: 1rem;">
+          <li style="margin-bottom: 0.5rem;"><b>目标：</b>您的棋子率先走到棋盘对面的底线（任意一格）即刻获胜。</li>
+          <li style="margin-bottom: 0.5rem;"><b>行动：</b>每回合您可以选择<b>移动一次棋子</b>，或者<b>放置一堵木墙</b>。</li>
+          <li style="margin-bottom: 0.5rem;"><b>木墙：</b>每位玩家共有 10 堵木墙，放下后不可移动。</li>
+          <li style="color: #ef4444; font-weight: bold; margin-bottom: 0.5rem;">核心限制 (绝对不能封死)：<br/><span style="color: #fde0c4; font-weight: normal;">放置木墙时，必须保证对手至少有一条能够到达其终点的通路。不能将对手完全“关入死胡同”。</span></li>
+          <li style="margin-bottom: 0.5rem;"><b>跳跃：</b>当双方棋子相邻时，可以直接跳过对手前进两格。如果对手背后被墙阻挡，则可以向其左右两侧斜跳。</li>
+        </ul>
+        <button id="btn-close-help" class="btn-wood" style="margin-top: 1.5rem;">明白，开始对弈！</button>
+      </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="modal-overlay">
+      <div class="modal" style="text-align: left; width: 90%; max-width: 380px; max-height: 90vh; display: flex; flex-direction: column; padding: 1.5rem;">
+        <h2 style="color: #ffd194; margin-bottom: 0.5rem; border-bottom: 2px solid #5a3d24; padding-bottom: 0.5rem; text-align: center; font-size: 1.3rem; flex-shrink: 0;">⚙️ 高级设置</h2>
+        
+        <div style="display: flex; flex-direction: column; gap: 0.8rem; padding: 0.5rem 0; overflow-y: auto; scrollbar-width: none;">
+          <label style="display: flex; align-items: center; justify-content: space-between; cursor: pointer; color: #fde0c4; font-size: 0.9rem;">
+            <span>📊 局势评估条 (Evaluation Bar)</span>
+            <input type="checkbox" id="setting-eval-bar" style="margin-left: 0.5rem; flex-shrink: 0;">
+          </label>
+          <label style="display: flex; align-items: center; justify-content: space-between; cursor: pointer; color: #fde0c4; font-size: 0.9rem;">
+            <span title="开启后有倒计时，每走一步增加5秒">⏳ 倒计时 (Time Limit)</span>
+            <input type="checkbox" id="setting-fisher-clock" style="margin-left: 0.5rem; flex-shrink: 0;">
+          </label>
+
+          <label style="display: flex; align-items: center; justify-content: space-between; cursor: pointer; color: #fde0c4; font-size: 0.9rem;">
+            <span>💡 允许请求 AI 提示 (Hint)</span>
+            <input type="checkbox" id="setting-hint" style="margin-left: 0.5rem; flex-shrink: 0;">
+          </label>
+        </div>
+        
+        <button id="btn-close-settings" class="btn-wood" style="margin-top: 1rem; width: 100%; flex-shrink: 0;">保存并关闭</button>
+      </div>
+    </div>
+    
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
