@@ -98,10 +98,9 @@ const timerController = new TimerController(
 timerController.onTimeout((winnerId) => declareWinner(winnerId, '(Timeout)'));
 
 export const proSettings = {
-  evalBar: localStorage.getItem('setting-eval-bar') === 'true',
-  fisherClock: localStorage.getItem('setting-fisher-clock') === 'true',
-
-  hint: localStorage.getItem('setting-hint') === 'true'
+  evalBar: localStorage.getItem('setting-eval-bar') !== 'false',
+  fisherClock: localStorage.getItem('setting-fisher-clock') !== 'false',
+  hint: localStorage.getItem('setting-hint') !== 'false'
 };
 
 function applySettings() {
