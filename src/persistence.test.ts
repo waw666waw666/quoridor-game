@@ -14,6 +14,7 @@ beforeEach(() => {
 describe('persistence', () => {
   it('saves non-network game state', () => {
     saveGameState({
+      version: 1,
       mode: 'local',
       aiDifficulty: 'normal',
       history: [{ type: 'move', player: 1, prevPos: { r: 0, c: 4 }, newPos: { r: 1, c: 4 } }],
@@ -24,11 +25,24 @@ describe('persistence', () => {
 
   it('does not save network games', () => {
     saveGameState({
+      version: 1,
       mode: 'network',
       aiDifficulty: 'normal',
       history: [{ type: 'move', player: 1, prevPos: { r: 0, c: 4 }, newPos: { r: 1, c: 4 } }],
     });
 
     expect(loadGameState()).toBeNull();
+  });
+
+  it('loads old history-only saves as version 1 local games', () => {
+    store.set('quoridor-save', JSON.stringify({
+      history: [{ type: 'move', player: 1, prevPos: { r: 0, c: 4 }, newPos: { r: 1, c: 4 } }],
+    }));
+
+    expect(loadGameState()).toEqual(expect.objectContaining({
+      version: 1,
+      mode: 'local',
+      aiDifficulty: 'normal',
+    }));
   });
 });

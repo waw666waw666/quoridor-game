@@ -7,6 +7,16 @@ export type Action =
   | { type: 'move'; player: number; prevPos: Position; newPos: Position }
   | { type: 'wall'; player: number; isH: boolean; r: number; c: number };
 
+export type SerializedGameState = {
+  p1: Player;
+  p2: Player;
+  currentPlayerId: number;
+  horizontalWalls: number[][];
+  verticalWalls: number[][];
+  winnerId: number | null;
+  history: Action[];
+};
+
 export class QuoridorGame {
   public p1: Player;
   public p2: Player;
@@ -25,14 +35,30 @@ export class QuoridorGame {
   }
 
   public clone(): QuoridorGame {
+    return QuoridorGame.fromJSON(this.toJSON());
+  }
+
+  public toJSON(): SerializedGameState {
+    return {
+      p1: JSON.parse(JSON.stringify(this.p1)),
+      p2: JSON.parse(JSON.stringify(this.p2)),
+      currentPlayerId: this.currentPlayer.id,
+      horizontalWalls: this.horizontalWalls.map(row => [...row]),
+      verticalWalls: this.verticalWalls.map(row => [...row]),
+      winnerId: this.winner?.id ?? null,
+      history: JSON.parse(JSON.stringify(this.history)),
+    };
+  }
+
+  public static fromJSON(state: SerializedGameState): QuoridorGame {
     const g = new QuoridorGame();
-    g.p1 = JSON.parse(JSON.stringify(this.p1));
-    g.p2 = JSON.parse(JSON.stringify(this.p2));
-    g.currentPlayer = this.currentPlayer.id === 1 ? g.p1 : g.p2;
-    g.horizontalWalls = this.horizontalWalls.map(row => [...row]);
-    g.verticalWalls = this.verticalWalls.map(row => [...row]);
-    g.winner = this.winner ? (this.winner.id === 1 ? g.p1 : g.p2) : null;
-    g.history = [...this.history];
+    g.p1 = JSON.parse(JSON.stringify(state.p1));
+    g.p2 = JSON.parse(JSON.stringify(state.p2));
+    g.currentPlayer = state.currentPlayerId === 1 ? g.p1 : g.p2;
+    g.horizontalWalls = state.horizontalWalls.map(row => [...row]);
+    g.verticalWalls = state.verticalWalls.map(row => [...row]);
+    g.winner = state.winnerId === null ? null : (state.winnerId === 1 ? g.p1 : g.p2);
+    g.history = JSON.parse(JSON.stringify(state.history));
     return g;
   }
 

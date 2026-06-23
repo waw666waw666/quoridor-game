@@ -5,14 +5,17 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "test": "vitest run",
+    "test": "vitest run src",
+    "test:e2e": "playwright test",
     "build": "tsc && vite build",
     "preview": "vite preview"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.0",
+    "jsdom": "^29.1.1",
     "typescript": "~6.0.2",
-    "vitest": "^4.0.15",
-    "vite": "^8.0.12"
+    "vite": "^8.0.12",
+    "vitest": "^4.0.15"
   },
   "dependencies": {
     "peerjs": "^1.5.5"

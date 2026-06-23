@@ -1,10 +1,7 @@
 import './style.css';
 import {
   BOARD_SIZE,
-  FISHER_INCREMENT,
-  FISHER_SECONDS,
   LAST_CELL,
-  TURN_SECONDS,
   WALL_GRID_SIZE,
 } from './constants';
 import { QuoridorGame } from './game';
@@ -14,6 +11,12 @@ import { QuoridorAI } from './ai';
 import { notationFor } from './notation';
 import { loadGameState, saveGameState } from './persistence';
 import { WallRenderer } from './wallRenderer';
+import { HintController } from './hintController';
+import { getBestMoveAsync } from './aiClient';
+import { applyRemoteActionSafely } from './networkRuntime';
+import { undoForMode } from './undo';
+import { InputController } from './inputController';
+import { TimerController } from './timerController';
 
 declare const confetti: (options: {
   particleCount: number;
@@ -32,7 +35,6 @@ const WALL_OFFSET = 50;
 const BOARD_POINTER_SIZE = 562;
 const WALL_CENTER_OFFSET = 57;
 const WALL_HIT_RADIUS = 28;
-const TICK_WARNING_SECONDS = 5;
 const WARNING_FLASH_MS = 500;
 const SHAKE_MS = 200;
 const AI_THINKING_DELAY_MS = 500;
@@ -49,10 +51,6 @@ function getEl<T extends HTMLElement>(id: string): T {
 let game = new QuoridorGame();
 let isPreviewHorizontal = true;
 let hoveredIntersection: { r: number, c: number } | null = null;
-let p1TimeLeft = TURN_SECONDS;
-let p2TimeLeft = TURN_SECONDS;
-let lastPlayerId = 1;
-let timerInterval: ReturnType<typeof setInterval> | null = null;
 
 let mode: Mode = 'local';
 let aiDifficulty: Difficulty = 'normal';
@@ -78,9 +76,7 @@ const btnAi = getEl<HTMLButtonElement>('btn-ai');
 const btnLocal = getEl<HTMLButtonElement>('btn-local');
 const aiDifficultyContainer = getEl('ai-difficulty-container');
 const diffBtns = document.querySelectorAll<HTMLButtonElement>('.diff-btn');
-const btnToggleBgm = getEl<HTMLButtonElement>('btn-toggle-bgm');
 const btnToggleSfx = getEl<HTMLButtonElement>('btn-toggle-sfx');
-const sliderBgmVol = getEl<HTMLInputElement>('slider-bgm-vol');
 const sliderSfxVol = getEl<HTMLInputElement>('slider-sfx-vol');
 const btnSettings = getEl<HTMLButtonElement>('btn-settings');
 const settingsModal = getEl('settings-modal');
@@ -92,6 +88,14 @@ const btnHint = getEl<HTMLButtonElement>('btn-hint');
 const evalBarContainer = getEl('eval-bar-container');
 const evalFill = getEl('eval-bar-fill');
 const roomInfo = document.getElementById('room-info');
+const timerController = new TimerController(
+  p1TimeEl,
+  p2TimeEl,
+  () => game.currentPlayer.id,
+  () => game.winner !== null,
+  (playerId) => playTickWarning(playerId)
+);
+timerController.onTimeout((winnerId) => declareWinner(winnerId, '(Timeout)'));
 
 export const proSettings = {
   evalBar: localStorage.getItem('setting-eval-bar') === 'true',
@@ -109,14 +113,11 @@ function applySettings() {
   if (proSettings.fisherClock) {
     p1TimeContainer.style.display = 'flex';
     p2TimeContainer.style.display = 'flex';
-    if (!timerInterval && !game.winner) startTimer();
+    if (!game.winner) startTimer();
   } else {
     p1TimeContainer.style.display = 'none';
     p2TimeContainer.style.display = 'none';
-    if (timerInterval) {
-      clearInterval(timerInterval);
-      timerInterval = null;
-    }
+    timerController.stop();
   }
 
 
@@ -141,6 +142,15 @@ const previewEl = document.createElement('div');
 previewEl.className = 'wall wall-preview';
 boardEl.appendChild(previewEl);
 const wallRenderer = new WallRenderer(boardEl, previewEl, CELL_STEP, WALL_OFFSET);
+const hintController = new HintController(boardEl, CELL_STEP);
+const inputController = new InputController(boardEl, BOARD_POINTER_SIZE, WALL_CENTER_OFFSET, WALL_HIT_RADIUS, WALL_GRID_SIZE);
+const touchRotateBtn = document.createElement('button');
+touchRotateBtn.id = 'btn-touch-rotate';
+touchRotateBtn.className = 'btn-wood touch-rotate';
+touchRotateBtn.type = 'button';
+touchRotateBtn.innerText = '切换墙方向';
+touchRotateBtn.style.display = 'none';
+boardEl.parentElement?.appendChild(touchRotateBtn);
 
 const cellEls: HTMLDivElement[][] = Array(BOARD_SIZE).fill(null).map(() => Array(BOARD_SIZE).fill(null));
 
@@ -150,6 +160,12 @@ function initAudio() {
 }
 
 document.body.addEventListener('click', initAudio, { once: true });
+
+touchRotateBtn.addEventListener('click', () => {
+  if (!hoveredIntersection || !isMyTurn()) return;
+  isPreviewHorizontal = !isPreviewHorizontal;
+  onIntersectionHover(hoveredIntersection.r, hoveredIntersection.c);
+});
 
 let hoveredPlayerForPath: 1 | 2 | null = null;
 
@@ -227,7 +243,7 @@ function initBoard() {
   });
 
   boardEl.addEventListener('mousemove', (e) => {
-    if (!isMyTurn() || document.getElementById('active-hint-wall')) return;
+    if (!isMyTurn()) return;
     
     const target = e.target as HTMLElement;
     if (target.classList.contains('cell') || target.classList.contains('player')) {
@@ -235,42 +251,8 @@ function initBoard() {
       return;
     }
 
-    const rect = boardEl.getBoundingClientRect();
-    const scaleX = BOARD_POINTER_SIZE / rect.width;
-    const scaleY = BOARD_POINTER_SIZE / rect.height;
-    const x = (e.clientX - rect.left) * scaleX;
-    const y = (e.clientY - rect.top) * scaleY;
-
-    let minDist = Infinity;
-    let bestPos: {r: number, c: number, isH: boolean} | null = null;
-
-    for (let r = 0; r < WALL_GRID_SIZE; r++) {
-      for (let c = 0; c < WALL_GRID_SIZE; c++) {
-        const cxH = c * 64 + WALL_CENTER_OFFSET;
-        const cyH = r * 64 + WALL_CENTER_OFFSET;
-        const dxH = Math.max(0, Math.abs(x - cxH) - WALL_CENTER_OFFSET);
-        const dyH = Math.abs(y - cyH);
-        const distH = Math.sqrt(dxH*dxH + dyH*dyH);
-        
-        if (distH < minDist) {
-          minDist = distH;
-          bestPos = { r, c, isH: true };
-        }
-
-        const cxV = c * 64 + WALL_CENTER_OFFSET;
-        const cyV = r * 64 + WALL_CENTER_OFFSET;
-        const dxV = Math.abs(x - cxV);
-        const dyV = Math.max(0, Math.abs(y - cyV) - WALL_CENTER_OFFSET);
-        const distV = Math.sqrt(dxV*dxV + dyV*dyV);
-
-        if (distV < minDist) {
-          minDist = distV;
-          bestPos = { r, c, isH: false };
-        }
-      }
-    }
-
-    if (minDist < WALL_HIT_RADIUS && bestPos) {
+    const bestPos = inputController.getWallTarget(e.clientX, e.clientY);
+    if (bestPos) {
       if (isPreviewHorizontal !== bestPos.isH || !hoveredIntersection || hoveredIntersection.r !== bestPos.r || hoveredIntersection.c !== bestPos.c) {
         isPreviewHorizontal = bestPos.isH;
         onIntersectionHover(bestPos.r, bestPos.c);
@@ -294,51 +276,39 @@ function initBoard() {
       onIntersectionClick(hoveredIntersection.r, hoveredIntersection.c);
     }
   });
+
+  boardEl.addEventListener('touchstart', (e) => {
+    if (!isMyTurn()) return;
+    const touch = e.touches[0];
+    if (!touch) return;
+
+    const target = inputController.getWallTarget(touch.clientX, touch.clientY);
+    if (!target) return;
+
+    e.preventDefault();
+    isPreviewHorizontal = target.isH;
+    onIntersectionHover(target.r, target.c);
+    touchRotateBtn.style.display = 'flex';
+  }, { passive: false });
+
+  boardEl.addEventListener('touchend', (e) => {
+    if (!hoveredIntersection || !isMyTurn() || previewEl.style.opacity !== '1') return;
+    e.preventDefault();
+    onIntersectionClick(hoveredIntersection.r, hoveredIntersection.c);
+  }, { passive: false });
 }
 
 function startTimer() {
-  if (timerInterval) {
-    clearInterval(timerInterval);
-    timerInterval = null;
-  }
   if (!proSettings.fisherClock) return;
-
-  timerInterval = setInterval(() => {
-    if (game.winner) {
-      if (timerInterval) clearInterval(timerInterval);
-      timerInterval = null;
-      return;
-    }
-    if (game.currentPlayer.id === 1) {
-      p1TimeLeft--;
-      if (p1TimeLeft <= 0) declareWinner(2, '超时判负 (Timeout)');
-      else if (p1TimeLeft <= TICK_WARNING_SECONDS) playTickWarning(1);
-    } else {
-      p2TimeLeft--;
-      if (p2TimeLeft <= 0) declareWinner(1, '超时判负 (Timeout)');
-      else if (p2TimeLeft <= TICK_WARNING_SECONDS) playTickWarning(2);
-    }
-    updateTimeUI();
-  }, 1000);
+  timerController.start();
 }
+
 
 function playTickWarning(playerId: number) {
   audio.playTickSound();
   const el = playerId === 1 ? p1TimeEl : p2TimeEl;
   el.classList.add('time-warning');
   setTimeout(() => el.classList.remove('time-warning'), WARNING_FLASH_MS);
-}
-
-function formatTime(secs: number) {
-  if (secs <= 0) return "00:00";
-  const m = Math.floor(secs / 60).toString().padStart(2, '0');
-  const s = (secs % 60).toString().padStart(2, '0');
-  return `${m}:${s}`;
-}
-
-function updateTimeUI() {
-  p1TimeEl.innerText = formatTime(p1TimeLeft);
-  p2TimeEl.innerText = formatTime(p2TimeLeft);
 }
 
 function declareWinner(playerId: number, reason: string = '') {
@@ -397,29 +367,32 @@ function updateUI() {
 
   wallRenderer.updateWalls(game.horizontalWalls, game.verticalWalls, isNewWall);
 
+  // --- Juicy Game Feel ---
+  if (lastAction && lastAction.type === 'wall') {
+    boardEl.classList.remove('shake');
+    void boardEl.offsetWidth; // trigger reflow
+    boardEl.classList.add('shake');
+  } else {
+    boardEl.classList.remove('shake');
+  }
+
+  const p1Dist = game.getShortestPath(game.p1.pos, game.p1.goalRow);
+  const p2Dist = game.getShortestPath(game.p2.pos, game.p2.goalRow);
+  if ((p1Dist >= 0 && p1Dist <= 2) || (p2Dist >= 0 && p2Dist <= 2)) {
+    boardEl.classList.add('match-point-warning');
+  } else {
+    boardEl.classList.remove('match-point-warning');
+  }
+  // -----------------------
+
   for (let r = 0; r < BOARD_SIZE; r++) {
     for (let c = 0; c < BOARD_SIZE; c++) {
       cellEls[r][c].className = 'cell';
     }
   }
 
-  // Timer logic for Fisher Clock
-  if (game.currentPlayer.id !== lastPlayerId) {
-    if (proSettings.fisherClock) {
-      if (lastPlayerId === 1) p1TimeLeft += FISHER_INCREMENT;
-      else p2TimeLeft += FISHER_INCREMENT;
-    } else {
-      if (game.currentPlayer.id === 1) p1TimeLeft = TURN_SECONDS;
-      else p2TimeLeft = TURN_SECONDS;
-    }
-    lastPlayerId = game.currentPlayer.id;
-  } else if (!proSettings.fisherClock && game.history.length === 0) {
-    p1TimeLeft = TURN_SECONDS;
-    p2TimeLeft = TURN_SECONDS;
-  }
-  updateTimeUI();
-  p1TimeEl.classList.remove('time-warning');
-  p2TimeEl.classList.remove('time-warning');
+  timerController.syncTurn(proSettings.fisherClock, game.history.length);
+  timerController.clearWarningClasses();
 
   if (proSettings.evalBar) {
     const score = QuoridorAI.getAdvantageScore(game);
@@ -484,6 +457,7 @@ function updateUI() {
 
 function saveGame() {
   saveGameState({
+    version: 1,
     mode,
     aiDifficulty,
     history: game.history
@@ -519,7 +493,7 @@ function loadGame(): boolean {
       }
     }
     
-    lastPlayerId = game.currentPlayer.id;
+    timerController.syncToCurrentPlayer();
     updateUI();
     startTimer();
     return true;
@@ -540,8 +514,8 @@ function triggerAI() {
   if (mode !== 'ai' || game.winner) return;
   if (game.currentPlayer.id === aiPlayerId) {
     document.body.classList.add('thinking');
-    setTimeout(() => {
-      const best = QuoridorAI.getBestMove(game, aiDifficulty);
+    setTimeout(async () => {
+      const best = await getBestMoveAsync(game, aiDifficulty);
       if (best) {
         if (best.type === 'move') {
           game.movePlayer(game.currentPlayer, best.r, best.c);
@@ -580,13 +554,11 @@ function onIntersectionHover(r: number, c: number) {
   previewEl.style.opacity = '1';
 
   const activeHint = document.getElementById('active-hint-wall');
-  if (activeHint) {
-    if (activeHint.dataset.r === r.toString() && activeHint.dataset.c === c.toString() && activeHint.dataset.isH === isPreviewHorizontal.toString()) {
-      activeHint.style.opacity = '0';
-    } else {
-      activeHint.style.opacity = '1';
-    }
-  }
+  hintController.setPreviewConflict(
+    activeHint?.dataset.r === r.toString() &&
+    activeHint.dataset.c === c.toString() &&
+    activeHint.dataset.isH === isPreviewHorizontal.toString()
+  );
 
   wallRenderer.renderPreview(isPreviewHorizontal, r, c, game.currentPlayer.id);
   if (game.canPlaceWall(isPreviewHorizontal, r, c)) {
@@ -603,8 +575,7 @@ function onIntersectionLeave() {
   previewEl.style.opacity = '0';
   previewEl.classList.remove('invalid');
 
-  const activeHint = document.getElementById('active-hint-wall');
-  if (activeHint) activeHint.style.opacity = '1';
+  hintController.setPreviewConflict(false);
   
   updatePaths();
 }
@@ -614,6 +585,7 @@ function onIntersectionClick(r: number, c: number) {
   
   if (game.placeWall(isPreviewHorizontal, r, c)) {
     previewEl.style.opacity = '0';
+    hintController.clearAfterWallPlacement(true);
     audio.playWallSound();
 
     const boardContainer = boardEl.parentElement;
@@ -635,11 +607,11 @@ net.onConnected = () => {
 };
 
 net.onAction = (action: NetAction) => {
+  if (!applyRemoteActionSafely(game, action, mode, myNetworkId)) return;
+
   if (action.type === 'move') {
-    game.movePlayer(game.currentPlayer, action.r, action.c);
     audio.playMoveSound();
   } else {
-    game.placeWall(action.isH, action.r, action.c);
     audio.playWallSound();
   }
   updateUI();
@@ -668,31 +640,7 @@ diffBtns.forEach(btn => {
   });
 });
 
-let lastBgmVol = parseFloat(sliderBgmVol.value) || 0.5;
 let lastSfxVol = parseFloat(sliderSfxVol.value) || 1.0;
-
-btnToggleBgm.addEventListener('click', () => {
-  const isEnabled = !audio.bgmEnabled;
-  if (isEnabled) {
-    audio.toggleBGM(true);
-    if (lastBgmVol === 0) lastBgmVol = 0.5;
-    sliderBgmVol.value = lastBgmVol.toString();
-    audio.setBGMVolume(lastBgmVol);
-    btnToggleBgm.classList.add('active');
-    btnToggleBgm.innerText = '🎵 开启背景音乐';
-    btnToggleBgm.style.opacity = '1';
-  } else {
-    audio.toggleBGM(false);
-    if (parseFloat(sliderBgmVol.value) > 0) {
-      lastBgmVol = parseFloat(sliderBgmVol.value);
-    }
-    sliderBgmVol.value = '0';
-    audio.setBGMVolume(0);
-    btnToggleBgm.classList.remove('active');
-    btnToggleBgm.innerText = '🎵 背景音乐: 关闭';
-    btnToggleBgm.style.opacity = '0.7';
-  }
-});
 
 btnToggleSfx.addEventListener('click', () => {
   const isEnabled = !audio.sfxEnabled;
@@ -717,24 +665,6 @@ btnToggleSfx.addEventListener('click', () => {
   }
 });
 
-sliderBgmVol.addEventListener('input', (e) => {
-  const vol = parseFloat((e.target as HTMLInputElement).value);
-  if (vol > 0) lastBgmVol = vol;
-  audio.setBGMVolume(vol);
-
-  if (vol > 0 && !audio.bgmEnabled) {
-    audio.toggleBGM(true);
-    btnToggleBgm.classList.add('active');
-    btnToggleBgm.innerText = '🎵 开启背景音乐';
-    btnToggleBgm.style.opacity = '1';
-  } else if (vol === 0 && audio.bgmEnabled) {
-    audio.toggleBGM(false);
-    btnToggleBgm.classList.remove('active');
-    btnToggleBgm.innerText = '🎵 背景音乐: 关闭';
-    btnToggleBgm.style.opacity = '0.7';
-  }
-});
-
 sliderSfxVol.addEventListener('input', (e) => {
   const vol = parseFloat((e.target as HTMLInputElement).value);
   if (vol > 0) lastSfxVol = vol;
@@ -754,9 +684,7 @@ sliderSfxVol.addEventListener('input', (e) => {
 });
 
 btnUndo.addEventListener('click', () => {
-  if (mode === 'network') return; // Undo disabled in network
-  if (game.undo()) {
-    if (mode === 'ai') game.undo(); // Undo AI move as well
+  if (undoForMode(game, mode, aiPlayerId)) {
     updateUI();
   }
 });
@@ -810,40 +738,17 @@ btnHint.addEventListener('click', async () => {
   btnHint.disabled = true;
 
   await new Promise(r => setTimeout(r, HINT_DELAY_MS));
-  const bestAction = QuoridorAI.getBestMove(game, 'normal');
+  const bestAction = await getBestMoveAsync(game, 'normal');
 
   btnHint.innerText = '💡 获取提示 (AI 支招)';
   btnHint.disabled = false;
 
   if (bestAction) {
     if (bestAction.type === 'move') {
-      const cell = cellEls[bestAction.r][bestAction.c];
-      cell.classList.add('hint-dot');
-      setTimeout(() => cell.classList.remove('hint-dot'), HINT_VISIBLE_MS);
+      hintController.showMove(bestAction, cellEls, HINT_VISIBLE_MS);
     } else {
-      const hintWall = document.createElement('div');
-      hintWall.className = 'wall';
-      hintWall.id = 'active-hint-wall';
-      hintWall.dataset.r = bestAction.r.toString();
-      hintWall.dataset.c = bestAction.c.toString();
-      hintWall.dataset.isH = bestAction.isH.toString();
-      hintWall.style.pointerEvents = 'none';
-      hintWall.style.backgroundColor = 'rgba(0, 255, 0, 0.4)';
-      hintWall.style.boxShadow = '0 0 15px rgba(0, 255, 0, 0.6)';
-      hintWall.style.zIndex = WALL_GRID_SIZE.toString();
-      if (bestAction.isH) {
-        hintWall.style.gridRow = `${bestAction.r * 2 + 2}`;
-        hintWall.style.gridColumn = `${bestAction.c * 2 + 1} / span 3`;
-        hintWall.style.width = '100%';
-        hintWall.style.height = '14px';
-      } else {
-        hintWall.style.gridRow = `${bestAction.r * 2 + 1} / span 3`;
-        hintWall.style.gridColumn = `${bestAction.c * 2 + 2}`;
-        hintWall.style.width = '14px';
-        hintWall.style.height = '100%';
-      }
-      boardEl.appendChild(hintWall);
-      setTimeout(() => hintWall.remove(), HINT_VISIBLE_MS);
+      hintController.show(bestAction);
+      setTimeout(() => hintController.clear(), HINT_VISIBLE_MS);
     }
   }
 });
@@ -853,14 +758,7 @@ btnHint.addEventListener('click', async () => {
 function resetGame(newMode: Mode) {
   mode = newMode;
   game = new QuoridorGame();
-  lastPlayerId = 1;
-  if (proSettings.fisherClock) {
-    p1TimeLeft = FISHER_SECONDS;
-    p2TimeLeft = FISHER_SECONDS;
-  } else {
-    p1TimeLeft = TURN_SECONDS;
-    p2TimeLeft = TURN_SECONDS;
-  }
+  timerController.reset(newMode, proSettings.fisherClock);
   updateUI();
   startTimer();
 }

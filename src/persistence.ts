@@ -3,11 +3,13 @@ import type { Action } from './game';
 export type SavedMode = 'local' | 'ai' | 'network';
 export type SavedDifficulty = 'easy' | 'normal' | 'hard';
 
-export type SavedGameState = {
+export type SavedGameStateV1 = {
+  version: 1;
   mode: SavedMode;
   aiDifficulty: SavedDifficulty;
   history: Action[];
 };
+export type SavedGameState = SavedGameStateV1;
 
 const SAVE_KEY = 'quoridor-save';
 const modes: SavedMode[] = ['local', 'ai', 'network'];
@@ -31,6 +33,7 @@ export function loadGameState(): SavedGameState | null {
     : 'normal';
 
   return {
+    version: 1,
     mode,
     aiDifficulty,
     history: parsed.history,

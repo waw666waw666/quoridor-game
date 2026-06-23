@@ -464,6 +464,21 @@ body.thinking .board {
   cursor: not-allowed;
 }
 
+.touch-rotate {
+  width: auto;
+  min-width: 132px;
+  margin-top: 0.75rem;
+  padding: 0.65rem 1rem;
+  font-size: 0.95rem;
+  align-self: center;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .touch-rotate {
+    display: none !important;
+  }
+}
+
 /* Player Tokens (3D Painted Wood Pieces) */
 .player {
   position: absolute;
@@ -614,4 +629,29 @@ input[type="checkbox"]:checked::after {
   font-size: 14px;
   font-weight: bold;
   text-shadow: 0 2px 4px rgba(0,0,0,0.8);
+}
+
+/* --- JUICY GAME FEEL --- */
+
+@keyframes camera-shake {
+  0% { transform: translate(0, 0) rotate(0deg); }
+  25% { transform: translate(1px, 1px) rotate(0.2deg); }
+  50% { transform: translate(-1px, -0.5px) rotate(-0.2deg); }
+  75% { transform: translate(0.5px, -1px) rotate(0.1deg); }
+  100% { transform: translate(0, 0) rotate(0deg); }
+}
+
+.shake {
+  animation: camera-shake 0.15s cubic-bezier(.36,.07,.19,.97) both;
+}
+
+@keyframes pulse-danger {
+  0% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.7); border-color: rgba(220, 38, 38, 0.5); }
+  70% { box-shadow: 0 0 20px 10px rgba(220, 38, 38, 0); border-color: #6a462f; }
+  100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0); }
+}
+
+.match-point-warning {
+  animation: pulse-danger 1.5s infinite;
+  border: 2px solid rgba(220, 38, 38, 0.8) !important;
 }

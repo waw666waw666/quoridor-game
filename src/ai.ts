@@ -10,16 +10,19 @@ const WIN = 100000;
 export class QuoridorAI {
   private static deadline = 0;
   private static timedOut = false;
+  private static currentDifficulty: 'easy' | 'normal' | 'hard' = 'normal';
 
   public static getBestMove(
     game: QuoridorGame,
     difficulty: 'easy' | 'normal' | 'hard' = 'normal'
   ): Action | null {
-    const ms = difficulty === 'hard' ? 1500 : difficulty === 'normal' ? 600 : 200;
+    this.currentDifficulty = difficulty;
+    const ms = difficulty === 'hard' ? 1500 : difficulty === 'normal' ? 400 : 200;
     this.deadline = performance.now() + ms;
     this.timedOut = false;
 
-    const maxDepth = difficulty === 'hard' ? 100 : difficulty === 'normal' ? 3 : 2;
+    // Hard: deep search. Normal: look ahead 2 plies. Easy: look ahead 1 ply.
+    const maxDepth = difficulty === 'hard' ? 100 : difficulty === 'normal' ? 2 : 1;
     let best: Action | null = null;
 
     for (let depth = 1; depth <= maxDepth; depth++) {
@@ -64,7 +67,11 @@ export class QuoridorAI {
       return 0;
     }
 
-    if (game.winner !== null) return -WIN;
+    if (game.winner !== null) {
+      // Opponent just moved and won. We are losing, but we prefer states where we are closer to our goal.
+      const meDist = game.getShortestPath(game.currentPlayer.pos, game.currentPlayer.goalRow);
+      return -WIN + (100 - meDist);
+    }
     if (depth === 0) return this.evaluate(game);
 
     const actions = this.getCandidates(game);
@@ -89,11 +96,11 @@ export class QuoridorAI {
     const me = game.currentPlayer;
     const opp = game.getOpponent(me);
 
-    if (me.pos.r === me.goalRow) return WIN;
-    if (opp.pos.r === opp.goalRow) return -WIN;
-
     const myDist = game.getShortestPath(me.pos, me.goalRow);
     const oppDist = game.getShortestPath(opp.pos, opp.goalRow);
+
+    if (me.pos.r === me.goalRow) return WIN;
+    if (opp.pos.r === opp.goalRow) return -WIN + (100 - myDist);
 
     if (myDist < 0) return -WIN;
     if (oppDist < 0) return WIN;
@@ -105,7 +112,16 @@ export class QuoridorAI {
     const progressScore = (myProgress - oppProgress) * 0.5;
     const repetitionScore = this.getRepetitionScore(game);
 
-    return distScore + wallScore + progressScore + repetitionScore;
+    let totalScore = distScore + wallScore + progressScore + repetitionScore;
+
+    // Inject "human error" / random noise based on difficulty
+    if (this.currentDifficulty === 'normal') {
+      totalScore += (Math.random() * 4 - 2); // Random noise [-2, +2]
+    } else if (this.currentDifficulty === 'easy') {
+      totalScore += (Math.random() * 12 - 6); // Random noise [-6, +6]
+    }
+
+    return totalScore;
   }
 
   private static getRepetitionScore(game: QuoridorGame): number {
@@ -153,6 +169,7 @@ export class QuoridorAI {
     this.addWallsAlongPath(myPath, wallSet);
 
     const oppBaseDist = oppPath.length - 1;
+    const myBaseDist = myPath.length - 1;
 
     for (const key of wallSet) {
       const isH = key[0] === 'H';
@@ -161,9 +178,10 @@ export class QuoridorAI {
 
       game.placeWall(isH, r, c);
       const newOppDist = game.getShortestPath(opp.pos, opp.goalRow);
+      const newMyDist = game.getShortestPath(me.pos, me.goalRow);
       game.undo();
 
-      if (newOppDist > oppBaseDist) {
+      if (newOppDist > oppBaseDist || newMyDist === myBaseDist) {
         actions.push({ type: 'wall', isH, r, c });
       }
     }
@@ -227,12 +245,12 @@ export class QuoridorAI {
 
       if (action.isH && u.c === v.c) {
         const r = Math.min(u.r, v.r);
-        return r === action.r && (action.c === u.c || action.c === u.c - 1);
+        if (r === action.r && (action.c === u.c || action.c === u.c - 1)) return true;
       }
 
       if (!action.isH && u.r === v.r) {
         const c = Math.min(u.c, v.c);
-        return c === action.c && (action.r === u.r || action.r === u.r - 1);
+        if (c === action.c && (action.r === u.r || action.r === u.r - 1)) return true;
       }
     }
 
