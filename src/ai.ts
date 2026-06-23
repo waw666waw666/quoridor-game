@@ -173,6 +173,14 @@ export class QuoridorAI {
 
     if (me.wallsLeft === 0) return actions;
 
+    // Easy AI rarely places walls, and only when the opponent is close to winning.
+    if (this.currentDifficulty === 'easy') {
+      const oppDist = game.getShortestPath(opp.pos, opp.goalRow);
+      if (oppDist > 3 || Math.random() > 0.2) {
+        return actions;
+      }
+    }
+
     const oppPath = game.getShortestPathNodes(opp.pos, opp.goalRow);
     const myPath = game.getShortestPathNodes(me.pos, me.goalRow);
     const wallSet = new Set<string>();
