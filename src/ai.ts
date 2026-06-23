@@ -116,9 +116,9 @@ export class QuoridorAI {
 
     // Inject "human error" / random noise based on difficulty
     if (this.currentDifficulty === 'normal') {
-      totalScore += (Math.random() * 4 - 2); // Random noise [-2, +2]
+      totalScore += (Math.random() * 20 - 10); // Random noise [-10, +10]
     } else if (this.currentDifficulty === 'easy') {
-      totalScore += (Math.random() * 12 - 6); // Random noise [-6, +6]
+      totalScore += (Math.random() * 50 - 25); // Random noise [-25, +25]
     }
 
     return totalScore;
