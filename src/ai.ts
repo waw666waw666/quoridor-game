@@ -44,6 +44,7 @@ export class QuoridorAI {
     let best: Action | null = actions[0];
     let alpha = -Infinity;
     const beta = Infinity;
+    let bestNoisyScore = -Infinity;
 
     for (const action of actions) {
       this.apply(game, action);
@@ -52,8 +53,27 @@ export class QuoridorAI {
 
       if (this.timedOut) return [best, alpha];
 
+      let noisyScore = score;
+      // Tie breaker: always prefer moving over placing walls if scores are equal
+      if (action.type === 'move') {
+        noisyScore += 0.1;
+      }
+
+      // Introduce occasional mistakes for lower difficulties, but only if not in immediate danger or winning
+      if (score > -50000 && score < 50000) {
+        if (this.currentDifficulty === 'normal' && Math.random() < 0.1) {
+            noisyScore -= 20; // 10% chance to penalize a move
+        } else if (this.currentDifficulty === 'easy' && Math.random() < 0.3) {
+            noisyScore -= 20; // 30% chance to penalize a move
+        }
+      }
+
       if (score > alpha) {
         alpha = score;
+      }
+
+      if (noisyScore > bestNoisyScore) {
+        bestNoisyScore = noisyScore;
         best = action;
       }
     }
@@ -70,7 +90,7 @@ export class QuoridorAI {
     if (game.winner !== null) {
       // Opponent just moved and won. We are losing, but we prefer states where we are closer to our goal.
       const meDist = game.getShortestPath(game.currentPlayer.pos, game.currentPlayer.goalRow);
-      return -WIN + (100 - meDist);
+      return -WIN + (100 - meDist) + this.getRepetitionScore(game);
     }
     if (depth === 0) return this.evaluate(game);
 
@@ -98,28 +118,20 @@ export class QuoridorAI {
 
     const myDist = game.getShortestPath(me.pos, me.goalRow);
     const oppDist = game.getShortestPath(opp.pos, opp.goalRow);
+    const repetitionScore = this.getRepetitionScore(game);
 
-    if (me.pos.r === me.goalRow) return WIN;
-    if (opp.pos.r === opp.goalRow) return -WIN + (100 - myDist);
+    if (me.pos.r === me.goalRow) return WIN + repetitionScore;
+    if (opp.pos.r === opp.goalRow) return -WIN + (100 - myDist) + repetitionScore;
 
-    if (myDist < 0) return -WIN;
-    if (oppDist < 0) return WIN;
+    if (myDist < 0) return -WIN + repetitionScore;
+    if (oppDist < 0) return WIN + repetitionScore;
 
     const distScore = (oppDist - myDist) * 15;
     const wallScore = (me.wallsLeft - opp.wallsLeft) * 2.0;
     const myProgress = me.id === 1 ? me.pos.r : (LAST_CELL - me.pos.r);
     const oppProgress = opp.id === 1 ? opp.pos.r : (LAST_CELL - opp.pos.r);
     const progressScore = (myProgress - oppProgress) * 0.5;
-    const repetitionScore = this.getRepetitionScore(game);
-
     let totalScore = distScore + wallScore + progressScore + repetitionScore;
-
-    // Inject "human error" / random noise based on difficulty
-    if (this.currentDifficulty === 'normal') {
-      totalScore += (Math.random() * 20 - 10); // Random noise [-10, +10]
-    } else if (this.currentDifficulty === 'easy') {
-      totalScore += (Math.random() * 50 - 25); // Random noise [-25, +25]
-    }
 
     return totalScore;
   }
